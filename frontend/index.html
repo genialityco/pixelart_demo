@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel Person</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Pixel Person</h1>
+      <p class="subtitle">Fotografía tu cuerpo completo y conviértete en un personaje pixel art jugable.</p>
+    </header>
+
+    <section id="capture-screen" class="screen">
+      <div class="camera-wrap">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="captureCanvas" hidden></canvas>
+        <img id="previewImg" hidden alt="Foto capturada" />
+      </div>
+
+      <p class="hint">De pie, de frente, con todo el cuerpo visible (de la cabeza a los pies) y buena luz — ya sea con la cámara o subiendo una foto.</p>
+
+      <div class="controls">
+        <button id="btnCapture">📸 Tomar foto</button>
+        <label class="upload-btn" for="fileUpload">📁 Subir imagen</label>
+        <input type="file" id="fileUpload" accept="image/*" hidden />
+        <button id="btnRetry" hidden>🔁 Reintentar</button>
+        <button id="btnProcess" hidden>✨ Generar personaje</button>
+      </div>
+
+      <p id="statusMsg" class="status"></p>
+    </section>
+
+    <section id="game-screen" class="screen" hidden>
+      <div id="gameContainer"></div>
+      <div class="controls">
+        <button id="btnBackToCapture">⬅ Volver a capturar</button>
+      </div>
+      <p class="hint">Flechas para moverte, Espacio o Flecha arriba para saltar.</p>
+    </section>
+
+    <div id="loadingOverlay" hidden>
+      <div class="spinner"></div>
+      <p>Procesando tu personaje…</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="js/capture.js"></script>
+  <script src="js/puppet.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

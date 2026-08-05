@@ -1,0 +1,13 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Logs y archivos temporales locales
+*.log
+_test_photo.jpg
+response.json
+
+# Entornos / editores
+.vscode/
+.idea/
