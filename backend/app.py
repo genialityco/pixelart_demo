@@ -21,6 +21,7 @@ load_dotenv()
 # junto a la foto capturada. Desactivable vía .env (SHOW_BG_PREVIEW=false).
 SHOW_BG_PREVIEW = os.environ.get("SHOW_BG_PREVIEW", "true").strip().lower() not in ("0", "false", "no")
 CHARACTER_SCALE = float(os.environ.get("CHARACTER_SCALE", "1.0"))
+CONTROL_MODE = os.environ.get("CONTROL_MODE", "keyboard").strip().lower()
 
 app = FastAPI(title="Pixel Person API")
 
@@ -36,7 +37,8 @@ app.add_middleware(
 async def get_config():
     return {
         "showBgPreview": SHOW_BG_PREVIEW,
-        "characterScale": CHARACTER_SCALE
+        "characterScale": CHARACTER_SCALE,
+        "controlMode": CONTROL_MODE
     }
 
 

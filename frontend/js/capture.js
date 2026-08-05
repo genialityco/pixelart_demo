@@ -18,10 +18,13 @@
   const noBgStatus = document.getElementById("noBgStatus");
   const noBgPreviewImg = document.getElementById("noBgPreviewImg");
 
+  const countdownEl = document.getElementById("captureCountdown");
+
   let stream = null;
   let capturedBlob = null;
   let showBgPreview = false;
   let characterScale = 1.0;
+  let controlMode = "keyboard";
 
   async function loadConfig() {
     try {
@@ -29,6 +32,7 @@
       const data = await res.json();
       showBgPreview = !!data.showBgPreview;
       if (data.characterScale) characterScale = data.characterScale;
+      if (data.controlMode) controlMode = data.controlMode;
     } catch (err) {
       showBgPreview = false;
     }
@@ -64,8 +68,12 @@
 
   async function startCamera() {
     try {
+      // La cámara se trata como horizontal (se rota 90° por software al
+      // capturar/mostrar), así que "1080p" es 1920x1080. `ideal` le pide al
+      // navegador acercarse lo más posible a esa resolución si la cámara no
+      // la tiene nativa, sin hacer fallar el acceso si no la soporta.
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1080 }, height: { ideal: 1440 }, facingMode: "user" },
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "user" },
         audio: false,
       });
       video.srcObject = stream;
@@ -79,9 +87,35 @@
     canvas.hidden = true;
     previewImg.hidden = true;
     btnCapture.hidden = false;
+    btnCapture.disabled = false;
     btnRetry.hidden = true;
     btnProcess.hidden = true;
     statusMsg.textContent = "";
+  }
+
+  // Cuenta regresiva sobre la vista de la cámara antes de capturar, para
+  // dar tiempo a acomodarse en cuadro.
+  function runCountdown(seconds) {
+    return new Promise((resolve) => {
+      let remaining = seconds;
+      countdownEl.hidden = false;
+
+      function tick() {
+        if (remaining <= 0) {
+          countdownEl.hidden = true;
+          resolve();
+          return;
+        }
+        countdownEl.textContent = String(remaining);
+        // Reinicia la animación de "pulso" en cada número.
+        countdownEl.style.animation = "none";
+        void countdownEl.offsetWidth;
+        countdownEl.style.animation = "";
+        remaining -= 1;
+        setTimeout(tick, 1000);
+      }
+      tick();
+    });
   }
 
   function showPreview() {
@@ -93,13 +127,20 @@
     btnProcess.hidden = false;
   }
 
-  btnCapture.addEventListener("click", () => {
+  function capturePhoto() {
     const w = video.videoWidth;
     const h = video.videoHeight;
-    canvas.width = w;
-    canvas.height = h;
+    // La cámara entrega el video en horizontal; la giramos 90° (igual que
+    // la vista previa en CSS, #mp-webcam y el canvas para MediaPipe en
+    // game.js) para que la foto capturada salga vertical.
+    canvas.width = h;
+    canvas.height = w;
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, w, h);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.drawImage(video, -w / 2, -h / 2, w, h);
+    ctx.restore();
     canvas.toBlob(
       (blob) => {
         capturedBlob = blob;
@@ -110,6 +151,12 @@
       "image/jpeg",
       0.92
     );
+  }
+
+  btnCapture.addEventListener("click", async () => {
+    btnCapture.disabled = true;
+    await runCountdown(3);
+    capturePhoto();
   });
 
   fileUpload.addEventListener("change", () => {
@@ -152,7 +199,7 @@
         });
       }
 
-      window.PixelPersonGame.start(data);
+      window.PixelPersonGame.start(data, characterScale, controlMode);
     } catch (err) {
       statusMsg.textContent = err.message;
     } finally {
@@ -163,6 +210,9 @@
   document.getElementById("btnBackToCapture").addEventListener("click", () => {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(err => console.warn(err));
+    }
+    if (window.PixelPersonGame.stopMediaPipe) {
+      window.PixelPersonGame.stopMediaPipe();
     }
     gameScreen.hidden = true;
     captureScreen.hidden = false;

@@ -5,6 +5,225 @@ window.PixelPersonGame = (() => {
   let game = null;
   let sceneRef = null;
   let pendingRig = null;
+  let activeControlMode = "keyboard";
+
+  let mpPose = null;
+  let mpLoop = false;
+  let mpState = {
+    wantsJump: false,
+    moving: false,
+    facing: 1,
+    hipBaseY: 0,
+    wristPrevY: [0, 0],
+    wristPrevVisible: [false, false],
+    moveEnergy: 0, // Inercia para no parar de correr de golpe
+    shoulderZDiff: 0 // Suavizado de la diferencia de profundidad de hombros
+  };
+
+  function initMediaPipe() {
+    if (mpPose) return;
+    
+    // Usar directamente el video que capturo webcam al principio (garantizado de tener el stream funcionando)
+    const mainVideo = document.getElementById('webcam');
+    
+    document.getElementById('mp-camera-wrap').hidden = false;
+    
+    // Mostramos la miniatura del video
+    const videoElement = document.getElementById('mp-webcam');
+    videoElement.srcObject = mainVideo.srcObject;
+    videoElement.play().catch(e => console.warn(e));
+
+    // Canvas oculto (no se agrega al DOM) solo para rotar 90° el frame antes
+    // de pasárselo a MediaPipe: la cámara entrega video horizontal, pero se
+    // usa en vertical (igual que la foto de captura). Si a MediaPipe se le
+    // manda el frame sin rotar, ve a la persona acostada de lado y el
+    // salto/dirección se calculan mal.
+    const rotatedCanvas = document.createElement('canvas');
+    const rotatedCtx = rotatedCanvas.getContext('2d');
+
+    mpPose = new Pose({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+    }});
+    
+    mpPose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    mpPose.onResults((results) => {
+      if (!results.poseLandmarks) {
+        mpState.moving = false;
+        return;
+      }
+      
+      const lm = results.poseLandmarks;
+      
+      // 1. Detección de Salto (Hombros en vez de caderas, para que funcione de cerca)
+      const shoulderY = (lm[11].y + lm[12].y) / 2;
+      if (mpState.hipBaseY === 0) {
+        mpState.hipBaseY = shoulderY; // inicializar
+      } else {
+        // Seguimos adaptando la base siempre, solo que mucho más lento
+        // mientras "está saltando". Si se congelara del todo (como antes),
+        // un falso positivo inicial la deja pegada a un valor malo para
+        // siempre y el salto queda repitiéndose sin que la persona se mueva.
+        const adaptRate = mpState.wantsJump ? 0.002 : 0.02;
+        mpState.hipBaseY = mpState.hipBaseY * (1 - adaptRate) + shoulderY * adaptRate;
+      }
+
+      // Umbral para activar/soltar, con margen de histéresis entre ambos
+      // para que no titubee. 0.13 pedía un salto exagerado; se bajó a 0.08.
+      if (shoulderY < mpState.hipBaseY - 0.08) {
+        mpState.wantsJump = true;
+      } else if (shoulderY > mpState.hipBaseY - 0.04) {
+        mpState.wantsJump = false; // Histéresis: bajar lo suficiente para terminar salto
+      }
+
+      // 2. Detección de Movimiento (Carrera con brazos)
+      // Usamos la MUÑECA (no el codo): al bombear los brazos se mueve mucho
+      // más que el codo, y así se distingue mejor de un simple giro de
+      // torso. Solo sumamos energía si la muñeca fue visible en este frame
+      // Y en el anterior -si no, un salto de "no visible" a "visible" (que
+      // pasa justo al girarte) se leería como un movimiento brusco falso.
+      const leftWrist = lm[15];
+      const rightWrist = lm[16];
+      const leftWristVisible = leftWrist.visibility > 0.5;
+      const rightWristVisible = rightWrist.visibility > 0.5;
+
+      const leftDeltaY = (leftWristVisible && mpState.wristPrevVisible[0]) ? (leftWrist.y - mpState.wristPrevY[0]) : 0;
+      const rightDeltaY = (rightWristVisible && mpState.wristPrevVisible[1]) ? (rightWrist.y - mpState.wristPrevY[1]) : 0;
+
+      // El braceo de correr es alterno (un brazo sube mientras el otro
+      // baja). Si ambos se mueven JUNTOS en la misma dirección -como al
+      // levantar los brazos para saltar- no cuenta como "correr", para no
+      // mezclar el salto con un empujón lateral no deseado.
+      let currentEnergy = 0;
+      if (leftDeltaY * rightDeltaY < 0) {
+        currentEnergy = Math.abs(leftDeltaY) + Math.abs(rightDeltaY);
+      }
+      mpState.wristPrevY = [leftWrist.y, rightWrist.y];
+      mpState.wristPrevVisible = [leftWristVisible, rightWristVisible];
+
+      // Sumar energía de movimiento y aplicar fricción (inercia)
+      mpState.moveEnergy = (mpState.moveEnergy * 0.85) + currentEnergy;
+
+      // Histéresis: exige más energía para empezar a correr que para parar,
+      // así no titubea alrededor del umbral.
+      if (mpState.moveEnergy > 0.12) {
+        mpState.moving = true;
+      } else if (mpState.moveEnergy < 0.05) {
+        mpState.moving = false;
+      }
+
+      // 3. Dirección (Perfil de los hombros), suavizada para que un giro
+      // leve/momentáneo no cambie la dirección de inmediato.
+      // Hay tres estados: -1/1 (girado a un lado) y 0 (de frente a la
+      // cámara). Sin el 0, un salto de frente heredaba la última dirección
+      // lateral detectada y el salto se iba hacia un lado en vez de subir
+      // recto. Entre las zonas de "girado" y "de frente" queda un margen de
+      // histéresis donde se conserva el último valor, para no titubear.
+      const shoulderZDiff = lm[11].z - lm[12].z;
+      mpState.shoulderZDiff = mpState.shoulderZDiff * 0.8 + shoulderZDiff * 0.2;
+
+      if (mpState.shoulderZDiff > 0.09) {
+        // Hombro derecho más cerca = el usuario giró hacia su izquierda
+        mpState.facing = -1;
+      } else if (mpState.shoulderZDiff < -0.09) {
+        // Hombro izquierdo más cerca = el usuario giró hacia su derecha
+        mpState.facing = 1;
+      } else if (Math.abs(mpState.shoulderZDiff) < 0.035) {
+        // Hombros a la misma profundidad = de frente a la cámara
+        mpState.facing = 0;
+      }
+
+      // -- DIBUJO DE DEBUG --
+      const canvasElement = document.getElementById('mp-canvas');
+      const canvasCtx = canvasElement.getContext('2d');
+      // El canvas de debug debe tener las mismas dimensiones que el frame
+      // ROTADO que se le mandó a MediaPipe (no las del video crudo), para
+      // que el esqueleto calce con la vista previa vertical.
+      if (canvasElement.width !== rotatedCanvas.width || canvasElement.height !== rotatedCanvas.height) {
+        canvasElement.width = rotatedCanvas.width;
+        canvasElement.height = rotatedCanvas.height;
+      }
+
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      if (window.drawConnectors && window.drawLandmarks) {
+        window.drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+        window.drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+      }
+
+      const debugDiv = document.getElementById('mp-debug');
+      const jumpDiff = (mpState.hipBaseY - shoulderY).toFixed(3);
+      const energyStr = mpState.moveEnergy.toFixed(3);
+      const shoulderDiff = mpState.shoulderZDiff.toFixed(3);
+
+      debugDiv.innerHTML = `
+        CORRER: ${mpState.moving ? '✅' : '❌'} (E:${energyStr})<br>
+        SALTO: ${mpState.wantsJump ? '✅' : '❌'} (Dif:${jumpDiff})<br>
+        DIR: ${mpState.facing === 1 ? '➡' : '⬅'} (DifZ:${shoulderDiff})
+      `;
+    });
+
+    mpLoop = true;
+    let isProcessing = false;
+    // La variable videoElement ya fue declarada arriba en initMediaPipe
+    
+    async function processVideo() {
+      if (!mpLoop) return;
+
+      if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && !isProcessing) {
+        isProcessing = true;
+
+        const vw = videoElement.videoWidth;
+        const vh = videoElement.videoHeight;
+
+        // Rota el frame 90° (ancho/alto intercambiados) antes de mandarlo a
+        // MediaPipe, mismo sentido que capture.js, style.css (#webcam) e
+        // index.html (#mp-webcam).
+        if (rotatedCanvas.width !== vh || rotatedCanvas.height !== vw) {
+          rotatedCanvas.width = vh;
+          rotatedCanvas.height = vw;
+        }
+        rotatedCtx.save();
+        rotatedCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+        rotatedCtx.rotate(-Math.PI / 2);
+        rotatedCtx.drawImage(videoElement, -vw / 2, -vh / 2, vw, vh);
+        rotatedCtx.restore();
+
+        try {
+          await mpPose.send({image: rotatedCanvas});
+        } catch (e) {
+          console.warn("Pose Error:", e);
+        }
+        isProcessing = false;
+      }
+      requestAnimationFrame(processVideo);
+    }
+    
+    mpPose.initialize().then(() => {
+      processVideo();
+    });
+  }
+
+  function stopMediaPipe() {
+    mpLoop = false;
+    document.getElementById('mp-camera-wrap').hidden = true;
+    
+    const videoElement = document.getElementById('mp-webcam');
+    if (videoElement) {
+      videoElement.srcObject = null;
+    }
+    
+    if (mpPose) {
+      mpPose.close();
+      mpPose = null;
+    }
+  }
 
   class PlatformerScene extends Phaser.Scene {
     constructor() {
@@ -24,7 +243,12 @@ window.PixelPersonGame = (() => {
       this.puppet = null;
 
       const map = this.make.tilemap({ key: 'map1' });
-      const tileScale = 2;
+      // El mapa (map1.json) mide solo 512x256px nativos. Con escala 2 el
+      // mundo (1024x512) apenas supera el viewport (800x480): quedan ~224px
+      // para moverse antes de chocar con el borde, lo que se siente como
+      // "el escenario es diminuto" y "no avanza al moverme". Con escala 3 el
+      // mundo (1536x768) da margen real de scroll en ambos ejes.
+      const tileScale = 3;
 
       // Background
       this.background = this.add.tileSprite(0, 0, map.widthInPixels * tileScale, map.heightInPixels * tileScale, 'Blue');
@@ -126,21 +350,41 @@ window.PixelPersonGame = (() => {
       const jumpVel = -640;
 
       let moving = false;
-      if (this.cursors.left.isDown) {
-        this.playerBody.body.setVelocityX(-speed);
-        this.player.facing = -1;
-        moving = true;
-      } else if (this.cursors.right.isDown) {
-        this.playerBody.body.setVelocityX(speed);
-        this.player.facing = 1;
-        moving = true;
+      let wantsJump = false;
+      let facing = this.player.facing;
+      const onGround = this.playerBody.body.blocked.down || this.playerBody.body.touching.down;
+
+      if (activeControlMode === "mediapipe") {
+        moving = mpState.moving;
+        wantsJump = mpState.wantsJump;
+        // La dirección se actualiza siempre según hacia dónde mira el
+        // usuario, no solo mientras corre -así el salto puede empujar hacia
+        // ese lado aunque no esté moviendo los brazos.
+        facing = mpState.facing;
+        this.player.facing = facing;
+
+        if (moving || !onGround) {
+          // Corriendo, o en el aire mirando hacia un lado: empuja en esa
+          // dirección (salto direccional tipo salto largo).
+          this.playerBody.body.setVelocityX(speed * facing);
+        } else {
+          this.playerBody.body.setVelocityX(0);
+        }
       } else {
-        this.playerBody.body.setVelocityX(0);
+        if (this.cursors.left.isDown) {
+          this.playerBody.body.setVelocityX(-speed);
+          this.player.facing = -1;
+          moving = true;
+        } else if (this.cursors.right.isDown) {
+          this.playerBody.body.setVelocityX(speed);
+          this.player.facing = 1;
+          moving = true;
+        } else {
+          this.playerBody.body.setVelocityX(0);
+        }
+        wantsJump = this.cursors.up.isDown || this.spaceKey.isDown;
       }
 
-      const wantsJump = this.cursors.up.isDown || this.spaceKey.isDown;
-      const onGround = this.playerBody.body.blocked.down || this.playerBody.body.touching.down;
-      
       if (wantsJump && onGround) {
         this.playerBody.body.setVelocityY(jumpVel);
       }
@@ -191,7 +435,14 @@ window.PixelPersonGame = (() => {
     });
   }
 
-  function start(rig) {
+  function start(rig, scale = 1.0, controlMode = "keyboard") {
+    activeControlMode = controlMode;
+    if (activeControlMode === "mediapipe") {
+      initMediaPipe();
+    } else {
+      stopMediaPipe();
+    }
+    
     ensureGame();
     if (sceneRef && sceneRef.scene.isActive()) {
       sceneRef.loadCharacter(rig);
@@ -200,5 +451,5 @@ window.PixelPersonGame = (() => {
     }
   }
 
-  return { start };
+  return { start, stopMediaPipe };
 })();

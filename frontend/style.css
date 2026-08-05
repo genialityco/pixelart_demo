@@ -15,6 +15,9 @@ body {
   max-width: 1100px;
   padding: 24px;
   position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 header { text-align: center; margin-bottom: 24px; }
@@ -22,6 +25,11 @@ header h1 { margin: 0; font-size: 2.8rem; letter-spacing: 1px; }
 .subtitle { color: #9a9ab0; margin: 8px 0 0; font-size: 1.2rem; }
 
 .screen { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+#capture-screen {
+  flex: 1;
+  min-height: 0;
+}
 
 #game-screen {
   position: fixed;
@@ -46,15 +54,18 @@ header h1 { margin: 0; font-size: 2.8rem; letter-spacing: 1px; }
 .preview-row {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
+  align-items: center;
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .camera-wrap {
   position: relative;
   width: 100%;
-  max-width: 600px;
+  max-width: 960px;
   aspect-ratio: 3 / 4;
   background: #000;
   border-radius: 12px;
@@ -63,14 +74,51 @@ header h1 { margin: 0; font-size: 2.8rem; letter-spacing: 1px; }
 }
 
 .preview-row .camera-wrap {
-  flex: 1 1 300px;
-  max-width: 480px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 720px;
 }
 
 #webcam, #captureCanvas, #previewImg {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* La cámara suele entregar el video en horizontal; la giramos 90° para
+   usarla en vertical dentro del cuadro (3:4, portrait). El tamaño está
+   calculado para que, tras rotar, cubra exactamente el cuadro sin dejar
+   huecos (133.34% = alto/ancho del cuadro, 75% = ancho/alto del cuadro).
+   Mismo sentido de giro que capture.js, index.html (#mp-webcam) y game.js
+   (canvas rotado para MediaPipe) -si tu cámara queda al revés hay que
+   cambiar el signo en los cuatro lugares a la vez. */
+#webcam {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 133.34%;
+  height: 75%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.countdown-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  animation: countdown-pulse 1s ease-out;
+}
+
+@keyframes countdown-pulse {
+  from { transform: scale(1.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .nobg-wrap {

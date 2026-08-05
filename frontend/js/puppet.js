@@ -71,7 +71,8 @@ class Puppet {
   }
 
   setFacing(dir) {
-    this.rootContainer.scaleX = dir >= 0 ? -1 : 1;
+    if (dir === 0) return; // de frente: conserva el volteo visual actual
+    this.rootContainer.scaleX = dir > 0 ? -1 : 1;
   }
 
   setState(state) {
@@ -90,28 +91,46 @@ class Puppet {
     const dt = delta / 1000;
 
     if (this.state === "walk") {
-      this.walkTime += dt * 9;
+      this.walkTime += dt * 14; // Velocidad de carrera
       const t = this.walkTime;
-      this._setAngle("left_upper_leg", Math.sin(t) * 28);
-      this._setAngle("right_upper_leg", Math.sin(t + Math.PI) * 28);
-      this._setAngle("left_lower_leg", Math.max(0, Math.sin(t + Math.PI * 0.6)) * -32);
-      this._setAngle("right_lower_leg", Math.max(0, Math.sin(t + Math.PI * 1.6)) * -32);
-      this._setAngle("left_upper_arm", Math.sin(t + Math.PI) * 24);
-      this._setAngle("right_upper_arm", Math.sin(t) * 24);
-      this._setAngle("left_lower_arm", 12 + Math.max(0, Math.sin(t)) * 18);
-      this._setAngle("right_lower_arm", 12 + Math.max(0, Math.sin(t + Math.PI)) * 18);
-      this._setAngle("head", Math.sin(t * 2) * 3);
-      this.bobOffset = -Math.abs(Math.sin(t)) * 5;
+      
+      // Piernas: ciclo de carrera realista
+      // El muslo va de adelante hacia atrás con sin(t)
+      this._setAngle("left_upper_leg", Math.sin(t) * 50);
+      this._setAngle("right_upper_leg", Math.sin(t + Math.PI) * 50);
+      
+      // La pantorrilla se dobla al máximo cuando la pierna vuelve hacia adelante (cos(t))
+      this._setAngle("left_lower_leg", Math.max(0, Math.cos(t)) * -95);
+      this._setAngle("right_lower_leg", Math.max(0, Math.cos(t + Math.PI)) * -95);
+      
+      // Brazos: opuestos a las piernas
+      this._setAngle("left_upper_arm", Math.sin(t + Math.PI) * 45);
+      this._setAngle("right_upper_arm", Math.sin(t) * 45);
+      
+      // Codos doblados en postura de corredor (más doblados cuando van adelante)
+      this._setAngle("left_lower_arm", -40 + Math.max(0, Math.sin(t + Math.PI)) * -40);
+      this._setAngle("right_lower_arm", -40 + Math.max(0, Math.sin(t)) * -40);
+      
+      // Cabeza y cuerpo (bobbing pronunciado)
+      this._setAngle("head", Math.sin(t * 2) * 4 + 8); // Inclinado hacia adelante
+      this.bobOffset = -Math.abs(Math.sin(t)) * 8; // Brinco
     } else if (this.state === "jump") {
-      this._setAngle("left_upper_leg", -18);
-      this._setAngle("right_upper_leg", -12);
-      this._setAngle("left_lower_leg", -40);
-      this._setAngle("right_lower_leg", -30);
-      this._setAngle("left_upper_arm", -55);
-      this._setAngle("right_upper_arm", -55);
-      this._setAngle("left_lower_arm", -15);
-      this._setAngle("right_lower_arm", -15);
-      this._setAngle("head", -4);
+      // Salto dinámico: pose de acción
+      // Pierna frontal levantada y doblada
+      this._setAngle("left_upper_leg", -60);
+      this._setAngle("left_lower_leg", -20);
+      // Pierna trasera estirada hacia atrás
+      this._setAngle("right_upper_leg", 30);
+      this._setAngle("right_lower_leg", -70);
+      
+      // Brazo frontal buscando altura
+      this._setAngle("left_upper_arm", -100);
+      this._setAngle("left_lower_arm", -10);
+      // Brazo trasero dando impulso hacia atrás
+      this._setAngle("right_upper_arm", 50);
+      this._setAngle("right_lower_arm", -40);
+      
+      this._setAngle("head", -15); // Mirando un poco hacia arriba
       this.bobOffset = 0;
     } else {
       this.walkTime += dt * 2;
