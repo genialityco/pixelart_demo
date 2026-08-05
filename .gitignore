@@ -3,6 +3,9 @@ backend/venv/
 __pycache__/
 *.pyc
 
+# Config local
+backend/.env
+
 # Logs y archivos temporales locales
 *.log
 _test_photo.jpg

@@ -1,5 +1,5 @@
-// Juego de plataformas básico (movimiento y colisiones caseras, sin plugin
-// de físicas) que usa el Puppet articulado como personaje jugable.
+// Juego de plataformas básico que usa el Puppet articulado como personaje jugable
+// y el escenario (tilemaps) del proyecto Dump-Land-Game.
 
 window.PixelPersonGame = (() => {
   let game = null;
@@ -11,22 +11,88 @@ window.PixelPersonGame = (() => {
       super("platformer");
     }
 
+    preload() {
+      this.load.tilemapTiledJSON('map1', 'assets/maps/map1.json');
+      this.load.image('Terrain (16x16)', 'assets/maps/Terrain16x16.png');
+      this.load.image('Collision', 'assets/maps/collisionTileSets.png');
+      this.load.image('Blue', 'assets/maps/bg-blue.png');
+    }
+
     create() {
       sceneRef = this;
       this.instanceId = 0;
       this.puppet = null;
 
-      this.add.rectangle(400, 300, 800, 600, 0x2b2b45);
-      this.platforms = [];
-      this.addPlatform(0, 560, 800, 40);
-      this.addPlatform(110, 430, 170, 20);
-      this.addPlatform(340, 330, 170, 20);
-      this.addPlatform(570, 430, 170, 20);
+      const map = this.make.tilemap({ key: 'map1' });
+      const tileScale = 2;
+
+      // Background
+      this.background = this.add.tileSprite(0, 0, map.widthInPixels * tileScale, map.heightInPixels * tileScale, 'Blue');
+      this.background.setOrigin(0, 0);
+      this.background.setScrollFactor(0);
+
+      const tileset1 = map.addTilesetImage('Terrain (16x16)', 'Terrain (16x16)');
+      const tileset2 = map.addTilesetImage('Collision', 'Collision');
+
+      this.collisionLayer = null;
+
+      map.layers.forEach(layer => {
+        let tilesets = [];
+        if (layer.properties) {
+          const layerTileSetProps = layer.properties.find(prop => prop.name === 'tilesets');
+          if (layerTileSetProps) {
+            const names = layerTileSetProps.value.split(',');
+            names.forEach(name => {
+              const cleanName = name.replaceAll('"', '').trim();
+              if (cleanName === 'Terrain (16x16)') tilesets.push(tileset1);
+              if (cleanName === 'Collision') tilesets.push(tileset2);
+            });
+          }
+        } else {
+          tilesets = [tileset1, tileset2];
+        }
+
+        const l = map.createLayer(layer.name, tilesets, 0, 0).setScale(tileScale);
+        
+        if (layer.name === 'Collision') {
+          l.setCollisionByProperty({ collide: true });
+          l.forEachTile(tile => {
+            if (tile.properties && tile.properties.canJump) {
+              tile.collideDown = false;
+              tile.collideLeft = false;
+              tile.collideRight = false;
+            }
+          });
+          l.setAlpha(0); // ocultar capa de colisiones
+          this.collisionLayer = l;
+        }
+      });
 
       this.cursors = this.input.keyboard.createCursorKeys();
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-      this.player = { x: 80, y: 520, groundY: 520, vx: 0, vy: 0, onGround: true, facing: 1 };
+      this.playerBody = this.add.rectangle(80, 200, 32, 64, 0x000000, 0);
+      this.physics.add.existing(this.playerBody);
+      this.playerBody.body.setCollideWorldBounds(true);
+      
+      this.physics.world.setBounds(0, 0, map.widthInPixels * tileScale, map.heightInPixels * tileScale);
+      this.cameras.main.setBounds(0, 0, map.widthInPixels * tileScale, map.heightInPixels * tileScale);
+      this.cameras.main.startFollow(this.playerBody);
+
+      // Crear un piso estático invisible a lo largo de todo el límite inferior del mapa
+      const floorHeight = 40;
+      const mapBottomY = map.heightInPixels * tileScale;
+      const mapWidth = map.widthInPixels * tileScale;
+      
+      const bottomFloor = this.add.rectangle(mapWidth / 2, mapBottomY - (floorHeight / 2), mapWidth, floorHeight, 0x000000, 0);
+      this.physics.add.existing(bottomFloor, true);
+      this.physics.add.collider(this.playerBody, bottomFloor);
+
+      if (this.collisionLayer) {
+        this.physics.add.collider(this.playerBody, this.collisionLayer);
+      }
+
+      this.player = { facing: 1 };
 
       if (pendingRig) {
         this.loadCharacter(pendingRig);
@@ -34,75 +100,58 @@ window.PixelPersonGame = (() => {
       }
     }
 
-    addPlatform(x, y, w, h) {
-      this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x4a4a6a).setStrokeStyle(2, 0x6c5ce7);
-      this.platforms.push({ x, y, w, h });
-    }
-
     async loadCharacter(rig) {
       if (this.puppet) this.puppet.destroy();
       this.instanceId += 1;
-      this.puppet = await Puppet.create(this, rig, 80, 520, this.instanceId);
+      
+      const spawnX = 80;
+      const spawnY = 200;
+      this.playerBody.setPosition(spawnX, spawnY);
+      this.playerBody.body.setVelocity(0, 0);
+      
+      this.puppet = await Puppet.create(this, rig, spawnX, spawnY, this.instanceId);
 
-      this.player.x = 80;
-      this.player.y = this.player.groundY;
-      this.player.vx = 0;
-      this.player.vy = 0;
-      this.player.onGround = true;
-
-      this.puppet.setPosition(this.player.x, this.player.y - this.puppet.footOffsetY);
+      this.puppet.setPosition(this.playerBody.x, this.playerBody.y - this.puppet.footOffsetY + 32);
     }
 
     update(time, delta) {
+      // scroll background
+      if (this.background) {
+        this.background.tilePositionY += 0.5;
+      }
+
       if (!this.puppet) return;
 
       const speed = 220;
-      const gravity = 1500;
       const jumpVel = -640;
-      const dt = delta / 1000;
 
       let moving = false;
       if (this.cursors.left.isDown) {
-        this.player.vx = -speed;
+        this.playerBody.body.setVelocityX(-speed);
         this.player.facing = -1;
         moving = true;
       } else if (this.cursors.right.isDown) {
-        this.player.vx = speed;
+        this.playerBody.body.setVelocityX(speed);
         this.player.facing = 1;
         moving = true;
       } else {
-        this.player.vx = 0;
+        this.playerBody.body.setVelocityX(0);
       }
 
       const wantsJump = this.cursors.up.isDown || this.spaceKey.isDown;
-      if (wantsJump && this.player.onGround) {
-        this.player.vy = jumpVel;
-        this.player.onGround = false;
+      const onGround = this.playerBody.body.blocked.down || this.playerBody.body.touching.down;
+      
+      if (wantsJump && onGround) {
+        this.playerBody.body.setVelocityY(jumpVel);
       }
 
-      this.player.vy += gravity * dt;
-      this.player.x += this.player.vx * dt;
-      this.player.y += this.player.vy * dt;
-
-      this.player.onGround = false;
-      for (const p of this.platforms) {
-        const withinX = this.player.x > p.x + 12 && this.player.x < p.x + p.w - 12;
-        const fallingOntoTop = this.player.vy >= 0 && this.player.y >= p.y - 4 && this.player.y <= p.y + 26;
-        if (withinX && fallingOntoTop) {
-          this.player.y = p.y;
-          this.player.vy = 0;
-          this.player.onGround = true;
-        }
+      // Solo reiniciar si el personaje se cae mucho más allá del fondo del mundo
+      if (this.playerBody.y > this.physics.world.bounds.height + 200) {
+        this.playerBody.setPosition(80, 200);
+        this.playerBody.body.setVelocity(0, 0);
       }
 
-      this.player.x = Phaser.Math.Clamp(this.player.x, 30, 770);
-      if (this.player.y > 700) {
-        this.player.x = 80;
-        this.player.y = this.player.groundY;
-        this.player.vy = 0;
-      }
-
-      if (!this.player.onGround) {
+      if (!onGround) {
         this.puppet.setState("jump");
       } else if (moving) {
         this.puppet.setState("walk");
@@ -112,7 +161,9 @@ window.PixelPersonGame = (() => {
 
       this.puppet.setFacing(this.player.facing);
       this.puppet.update(delta);
-      this.puppet.setPosition(this.player.x, this.player.y - this.puppet.footOffsetY);
+      
+      // Update puppet position based on physics body
+      this.puppet.setPosition(this.playerBody.x, this.playerBody.y - this.puppet.footOffsetY + 32);
     }
   }
 
@@ -124,10 +175,17 @@ window.PixelPersonGame = (() => {
       backgroundColor: "#2b2b45",
       pixelArt: true,
       scale: {
-        mode: Phaser.Scale.FIT,
+        mode: Phaser.Scale.ENVELOP,
         autoCenter: Phaser.Scale.CENTER_BOTH,
         width: 800,
-        height: 600,
+        height: 480,
+      },
+      physics: {
+        default: 'arcade',
+        arcade: {
+          gravity: { y: 1500 },
+          debug: false
+        }
       },
       scene: [PlatformerScene],
     });

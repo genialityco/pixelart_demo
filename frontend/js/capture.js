@@ -14,8 +14,53 @@
   const captureScreen = document.getElementById("capture-screen");
   const gameScreen = document.getElementById("game-screen");
 
+  const noBgWrap = document.getElementById("noBgWrap");
+  const noBgStatus = document.getElementById("noBgStatus");
+  const noBgPreviewImg = document.getElementById("noBgPreviewImg");
+
   let stream = null;
   let capturedBlob = null;
+  let showBgPreview = false;
+  let characterScale = 1.0;
+
+  async function loadConfig() {
+    try {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      showBgPreview = !!data.showBgPreview;
+      if (data.characterScale) characterScale = data.characterScale;
+    } catch (err) {
+      showBgPreview = false;
+    }
+  }
+
+  function hideNoBgPreview() {
+    noBgWrap.hidden = true;
+    noBgPreviewImg.hidden = true;
+    noBgPreviewImg.src = "";
+    noBgStatus.textContent = "";
+  }
+
+  async function updateNoBgPreview(blob) {
+    if (!showBgPreview) return;
+    noBgWrap.hidden = false;
+    noBgPreviewImg.hidden = true;
+    noBgStatus.textContent = "Quitando fondo…";
+
+    const formData = new FormData();
+    formData.append("file", blob, blob.name || "photo.jpg");
+
+    try {
+      const res = await fetch("/api/preview", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "No se pudo generar la vista previa.");
+      noBgPreviewImg.src = data.image;
+      noBgPreviewImg.hidden = false;
+      noBgStatus.textContent = "";
+    } catch (err) {
+      noBgStatus.textContent = err.message;
+    }
+  }
 
   async function startCamera() {
     try {
@@ -60,6 +105,7 @@
         capturedBlob = blob;
         previewImg.src = URL.createObjectURL(blob);
         showPreview();
+        updateNoBgPreview(blob);
       },
       "image/jpeg",
       0.92
@@ -72,11 +118,13 @@
     capturedBlob = file;
     previewImg.src = URL.createObjectURL(file);
     showPreview();
+    updateNoBgPreview(file);
   });
 
   btnRetry.addEventListener("click", () => {
     capturedBlob = null;
     fileUpload.value = "";
+    hideNoBgPreview();
     showLiveView();
   });
 
@@ -96,6 +144,14 @@
       }
       captureScreen.hidden = true;
       gameScreen.hidden = false;
+      
+      // Request fullscreen for the game
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch((err) => {
+          console.warn("Fullscreen API is not supported or permission denied", err);
+        });
+      }
+
       window.PixelPersonGame.start(data);
     } catch (err) {
       statusMsg.textContent = err.message;
@@ -105,10 +161,17 @@
   });
 
   document.getElementById("btnBackToCapture").addEventListener("click", () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(err => console.warn(err));
+    }
     gameScreen.hidden = true;
     captureScreen.hidden = false;
+    capturedBlob = null;
+    fileUpload.value = "";
+    hideNoBgPreview();
     showLiveView();
   });
 
+  loadConfig();
   startCamera();
 })();

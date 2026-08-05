@@ -14,10 +14,17 @@
     </header>
 
     <section id="capture-screen" class="screen">
-      <div class="camera-wrap">
-        <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="captureCanvas" hidden></canvas>
-        <img id="previewImg" hidden alt="Foto capturada" />
+      <div class="preview-row">
+        <div class="camera-wrap">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="captureCanvas" hidden></canvas>
+          <img id="previewImg" hidden alt="Foto capturada" />
+        </div>
+        <div class="camera-wrap nobg-wrap" id="noBgWrap" hidden>
+          <p class="nobg-label">Sin fondo</p>
+          <p id="noBgStatus" class="nobg-status"></p>
+          <img id="noBgPreviewImg" hidden alt="Vista previa sin fondo" />
+        </div>
       </div>
 
       <p class="hint">De pie, de frente, con todo el cuerpo visible (de la cabeza a los pies) y buena luz — ya sea con la cámara o subiendo una foto.</p>

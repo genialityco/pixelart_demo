@@ -98,7 +98,7 @@ def build_rig(pixel_art: Image.Image, lm: dict[str, Point]) -> Optional[dict]:
     hip_w = _dist(lm["left_hip"], lm["right_hip"])
 
     arm_hw = max(4.0, shoulder_w * 0.16)
-    leg_hw = max(4.0, hip_w * 0.22)
+    leg_hw = max(6.0, hip_w * 0.34)
     head_hw = max(6.0, shoulder_w * 0.62)
 
     landmarks = dict(lm)

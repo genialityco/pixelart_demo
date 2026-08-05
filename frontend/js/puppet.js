@@ -71,7 +71,7 @@ class Puppet {
   }
 
   setFacing(dir) {
-    this.rootContainer.scaleX = dir >= 0 ? 1 : -1;
+    this.rootContainer.scaleX = dir >= 0 ? -1 : 1;
   }
 
   setState(state) {
@@ -94,8 +94,8 @@ class Puppet {
       const t = this.walkTime;
       this._setAngle("left_upper_leg", Math.sin(t) * 28);
       this._setAngle("right_upper_leg", Math.sin(t + Math.PI) * 28);
-      this._setAngle("left_lower_leg", Math.max(0, Math.sin(t + Math.PI * 0.6)) * 32);
-      this._setAngle("right_lower_leg", Math.max(0, Math.sin(t + Math.PI * 1.6)) * 32);
+      this._setAngle("left_lower_leg", Math.max(0, Math.sin(t + Math.PI * 0.6)) * -32);
+      this._setAngle("right_lower_leg", Math.max(0, Math.sin(t + Math.PI * 1.6)) * -32);
       this._setAngle("left_upper_arm", Math.sin(t + Math.PI) * 24);
       this._setAngle("right_upper_arm", Math.sin(t) * 24);
       this._setAngle("left_lower_arm", 12 + Math.max(0, Math.sin(t)) * 18);
@@ -105,8 +105,8 @@ class Puppet {
     } else if (this.state === "jump") {
       this._setAngle("left_upper_leg", -18);
       this._setAngle("right_upper_leg", -12);
-      this._setAngle("left_lower_leg", 40);
-      this._setAngle("right_lower_leg", 30);
+      this._setAngle("left_lower_leg", -40);
+      this._setAngle("right_lower_leg", -30);
       this._setAngle("left_upper_arm", -55);
       this._setAngle("right_upper_arm", -55);
       this._setAngle("left_lower_arm", -15);
