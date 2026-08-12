@@ -17,7 +17,8 @@ window.PixelPersonGame = (() => {
     wristPrevY: [0, 0],
     wristPrevVisible: [false, false],
     moveEnergy: 0, // Inercia para no parar de correr de golpe
-    shoulderZDiff: 0 // Suavizado de la diferencia de profundidad de hombros
+    shoulderZDiff: 0, // Suavizado de la diferencia de profundidad de hombros
+    gesture: null // "hadouken" | "heart" | "flower" | null
   };
 
   function initMediaPipe() {
@@ -57,6 +58,7 @@ window.PixelPersonGame = (() => {
     mpPose.onResults((results) => {
       if (!results.poseLandmarks) {
         mpState.moving = false;
+        mpState.gesture = null;
         return;
       }
       
@@ -140,6 +142,35 @@ window.PixelPersonGame = (() => {
         mpState.facing = 0;
       }
 
+      // 4. Gestos para las habilidades. MediaPipe Pose solo da landmarks de
+      // CUERPO (hombros/codos/muñecas), no de dedos, así que no podemos
+      // reconocer de verdad un "corazón" o un "pulgares arriba" -usamos la
+      // posición de las muñecas entre sí y respecto a la cabeza/hombros
+      // como una aproximación razonable:
+      //  - Hadouken: muñecas juntas, a la altura del pecho/panza.
+      //  - Corazón: muñecas juntas, a la altura de la cara/cabeza (más arriba).
+      //  - Flor: manos separadas y levantadas por encima de los codos (como
+      //    los dos brazos en alto haciendo "pulgares arriba").
+      const noseY = lm[0].y;
+      let gesture = null;
+      if (leftWristVisible && rightWristVisible) {
+        const wristDist = Math.hypot(leftWrist.x - rightWrist.x, leftWrist.y - rightWrist.y);
+        const wristsY = (leftWrist.y + rightWrist.y) / 2;
+        const together = wristDist < 0.10;
+        if (together && wristsY < noseY + 0.06) {
+          gesture = "heart";
+        } else if (together) {
+          gesture = "hadouken";
+        } else if (
+          wristsY < shoulderY &&
+          leftWrist.y < lm[13].y - 0.02 &&
+          rightWrist.y < lm[14].y - 0.02
+        ) {
+          gesture = "flower";
+        }
+      }
+      mpState.gesture = gesture;
+
       // -- DIBUJO DE DEBUG --
       const canvasElement = document.getElementById('mp-canvas');
       const canvasCtx = canvasElement.getContext('2d');
@@ -165,7 +196,8 @@ window.PixelPersonGame = (() => {
       debugDiv.innerHTML = `
         CORRER: ${mpState.moving ? '✅' : '❌'} (E:${energyStr})<br>
         SALTO: ${mpState.wantsJump ? '✅' : '❌'} (Dif:${jumpDiff})<br>
-        DIR: ${mpState.facing === 1 ? '➡' : '⬅'} (DifZ:${shoulderDiff})
+        DIR: ${mpState.facing === 1 ? '➡' : '⬅'} (DifZ:${shoulderDiff})<br>
+        GESTO: ${mpState.gesture || '-'}
       `;
     });
 
@@ -294,6 +326,15 @@ window.PixelPersonGame = (() => {
 
       this.cursors = this.input.keyboard.createCursorKeys();
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.keyQ = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+      this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+      this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+      this.abilityCooldowns = {};
+      this.lastGesture = null;
+      // Las flores quedan tiradas en el suelo -necesitan chocar con el piso
+      // y las plataformas igual que el jugador-, el hadouken y el corazón
+      // vuelan derecho y no colisionan con nada.
+      this.flowerGroup = this.physics.add.group();
 
       this.playerBody = this.add.rectangle(80, 200, 32, 64, 0x000000, 0);
       this.physics.add.existing(this.playerBody);
@@ -311,9 +352,11 @@ window.PixelPersonGame = (() => {
       const bottomFloor = this.add.rectangle(mapWidth / 2, mapBottomY - (floorHeight / 2), mapWidth, floorHeight, 0x000000, 0);
       this.physics.add.existing(bottomFloor, true);
       this.physics.add.collider(this.playerBody, bottomFloor);
+      this.physics.add.collider(this.flowerGroup, bottomFloor);
 
       if (this.collisionLayer) {
         this.physics.add.collider(this.playerBody, this.collisionLayer);
+        this.physics.add.collider(this.flowerGroup, this.collisionLayer);
       }
 
       this.player = { facing: 1 };
@@ -336,6 +379,64 @@ window.PixelPersonGame = (() => {
       this.puppet = await Puppet.create(this, rig, spawnX, spawnY, this.instanceId);
 
       this.puppet.setPosition(this.playerBody.x, this.playerBody.y - this.puppet.footOffsetY + 32);
+    }
+
+    // dir: 1 = derecha, -1 = izquierda. Usa el volteo visual actual del
+    // muñeco (setFacing ignora dir=0 "de frente" y conserva el último
+    // espejo), así la habilidad siempre sale para el lado correcto.
+    currentFacingDir() {
+      if (!this.puppet) return 1;
+      return this.puppet.rootContainer.scaleX < 0 ? 1 : -1;
+    }
+
+    castAbility(type) {
+      if (!this.puppet) return;
+      const now = this.time.now;
+      const cooldownMs = 700;
+      if (this.abilityCooldowns[type] && now - this.abilityCooldowns[type] < cooldownMs) return;
+      this.abilityCooldowns[type] = now;
+
+      const dir = this.currentFacingDir();
+      const originX = this.playerBody.x + dir * 26;
+      const originY = this.playerBody.y - this.puppet.footOffsetY * 0.55;
+
+      this.puppet.playAction(type);
+
+      if (type === "hadouken") this.spawnHadouken(originX, originY, dir);
+      else if (type === "heart") this.spawnHeart(originX, originY, dir);
+      else if (type === "flower") this.spawnFlower(originX, originY, dir);
+    }
+
+    spawnHadouken(x, y, dir) {
+      const proj = this.add.text(x, y, "💥", { fontSize: "30px" }).setOrigin(0.5);
+      proj.setFlipX(dir < 0);
+      this.physics.add.existing(proj);
+      proj.body.setAllowGravity(false);
+      proj.body.setVelocityX(520 * dir);
+      this.time.delayedCall(1200, () => proj.destroy());
+    }
+
+    spawnHeart(x, y, dir) {
+      const proj = this.add.text(x, y, "❤️", { fontSize: "26px" }).setOrigin(0.5);
+      this.physics.add.existing(proj);
+      proj.body.setAllowGravity(false);
+      proj.body.setVelocityX(360 * dir);
+      proj.body.setVelocityY(-30);
+      this.time.delayedCall(1400, () => proj.destroy());
+    }
+
+    spawnFlower(x, y, dir) {
+      const proj = this.add.text(x, y, "🌸", { fontSize: "26px" }).setOrigin(0.5);
+      this.physics.add.existing(proj);
+      proj.body.setVelocityX(180 * dir);
+      proj.body.setVelocityY(-260);
+      proj.body.setBounce(0.25);
+      proj.body.setDragX(140);
+      proj.body.setCollideWorldBounds(true);
+      this.flowerGroup.add(proj);
+      // Se queda tirada en el piso un rato y después desaparece, para que
+      // no se acumulen flores para siempre.
+      this.time.delayedCall(8000, () => proj.destroy());
     }
 
     update(time, delta) {
@@ -387,6 +488,21 @@ window.PixelPersonGame = (() => {
 
       if (wantsJump && onGround) {
         this.playerBody.body.setVelocityY(jumpVel);
+      }
+
+      // Habilidades: Q/W/E siempre funcionan (independiente del modo de
+      // control). En modo mediapipe, además, el gesto correspondiente las
+      // dispara -solo en el flanco de "recién detectado" para no repetir
+      // la habilidad en cada frame mientras se mantiene la pose.
+      if (Phaser.Input.Keyboard.JustDown(this.keyQ)) this.castAbility("hadouken");
+      if (Phaser.Input.Keyboard.JustDown(this.keyW)) this.castAbility("heart");
+      if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.castAbility("flower");
+
+      if (activeControlMode === "mediapipe") {
+        if (mpState.gesture && mpState.gesture !== this.lastGesture) {
+          this.castAbility(mpState.gesture);
+        }
+        this.lastGesture = mpState.gesture;
       }
 
       // Solo reiniciar si el personaje se cae mucho más allá del fondo del mundo

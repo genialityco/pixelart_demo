@@ -5,12 +5,13 @@ import pathlib
 from io import BytesIO
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from vision.background import bounding_box, remove_background
+from vision.heuristic_pose import estimate_landmarks
 from vision.pixelate import pixelate
 from vision.pose import detect_landmarks
 from vision.rig import build_rig
@@ -66,7 +67,7 @@ async def preview_background_removal(file: UploadFile = File(...)):
 
 
 @app.post("/api/process")
-async def process_photo(file: UploadFile = File(...)):
+async def process_photo(file: UploadFile = File(...), is_pixel_art: bool = Form(False)):
     raw = await file.read()
     try:
         source = Image.open(BytesIO(raw)).convert("RGB")
@@ -75,14 +76,6 @@ async def process_photo(file: UploadFile = File(...)):
 
     # La detección de pose funciona mejor con el fondo original todavía presente.
     landmarks = detect_landmarks(source)
-    if landmarks is None:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "No se detectó una persona de cuerpo completo y de frente. "
-                "Aléjate de la cámara para que se vea de pies a cabeza e inténtalo de nuevo."
-            ),
-        )
 
     try:
         cutout = remove_background(raw)
@@ -94,11 +87,28 @@ async def process_photo(file: UploadFile = File(...)):
                 f"descargar). Revisa la conexión a internet. Detalle: {exc}"
             ),
         )
+
+    if landmarks is None:
+        # MediaPipe está entrenado con fotos reales: en imágenes ya
+        # estilizadas (arte pixel, avatares generados por IA, etc.) no
+        # detecta nada. Como respaldo, estimamos un esqueleto aproximado a
+        # partir de la silueta del recorte sin fondo.
+        landmarks = estimate_landmarks(cutout)
+
+    if landmarks is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No se detectó una persona de cuerpo completo y de frente. "
+                "Aléjate de la cámara para que se vea de pies a cabeza e inténtalo de nuevo."
+            ),
+        )
+
     bbox = bounding_box(cutout)
     
     # Aplicar la escala configurada en .env al tamaño final del personaje (por defecto 480px de alto)
     target_height = int(480 * CHARACTER_SCALE)
-    pixel_art, transform = pixelate(cutout, bbox, display_height=target_height)
+    pixel_art, transform = pixelate(cutout, bbox, display_height=target_height, already_pixel_art=is_pixel_art)
     
     transformed_landmarks = {name: transform.apply(pt) for name, pt in landmarks.items()}
 

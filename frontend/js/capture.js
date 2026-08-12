@@ -18,6 +18,8 @@
   const noBgStatus = document.getElementById("noBgStatus");
   const noBgPreviewImg = document.getElementById("noBgPreviewImg");
 
+  const isPixelArtCheckbox = document.getElementById("isPixelArt");
+
   const countdownEl = document.getElementById("captureCountdown");
 
   let stream = null;
@@ -182,6 +184,7 @@
 
     const formData = new FormData();
     formData.append("file", capturedBlob, capturedBlob.name || "photo.jpg");
+    formData.append("is_pixel_art", isPixelArtCheckbox.checked ? "true" : "false");
 
     try {
       const res = await fetch("/api/process", { method: "POST", body: formData });

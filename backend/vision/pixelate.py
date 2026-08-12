@@ -23,12 +23,28 @@ def pixelate(
     colors: int = 24,
     alpha_cutoff: int = 60,
     alpha_floor: int = 12,
+    already_pixel_art: bool = False,
 ) -> tuple[Image.Image, PixelTransform]:
     """Reduce resolución + cuantiza paleta + reescala con vecino más cercano.
 
     Devuelve el sprite pixel art (RGBA) y el transform para remapear landmarks.
     """
     crop = cutout.crop(bbox)
+
+    scale_total = display_height / crop.height
+    display_w = max(1, round(crop.width * scale_total))
+    transform = PixelTransform(crop_left=bbox[0], crop_top=bbox[1], scale=scale_total)
+
+    if already_pixel_art:
+        # La imagen ya es pixel art: no la volvemos a reducir/cuantizar (eso
+        # le bajaría la calidad y podría correr colores que ya están bien).
+        # Solo la reescalamos (NEAREST, sin difuminar los bordes) y limpiamos
+        # el alpha casi-transparente.
+        resized = crop.resize((display_w, display_height), Image.NEAREST)
+        r, g, b, a = resized.split()
+        alpha_final = a.point(lambda v: 0 if v < alpha_floor else v)
+        pixel_art = Image.merge("RGBA", (r, g, b, alpha_final))
+        return pixel_art, transform
 
     scale_small = small_height / crop.height
     small_w = max(1, round(crop.width * scale_small))
@@ -58,9 +74,5 @@ def pixelate(
     alpha_final = a.point(lambda v: 0 if v < alpha_floor else v)
     small_rgba = Image.merge("RGBA", (*quantized.split(), alpha_final))
 
-    scale_total = display_height / crop.height
-    display_w = max(1, round(crop.width * scale_total))
     pixel_art = small_rgba.resize((display_w, display_height), Image.NEAREST)
-
-    transform = PixelTransform(crop_left=bbox[0], crop_top=bbox[1], scale=scale_total)
     return pixel_art, transform

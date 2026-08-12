@@ -38,6 +38,8 @@ class Puppet {
     this.state = "idle";
     this.bobOffset = 0;
     this.footOffsetY = rig.meta ? rig.meta.footOffsetY : 0;
+    this.actionState = null;
+    this.actionTimeLeft = 0;
   }
 
   build(x, y) {
@@ -82,13 +84,58 @@ class Puppet {
     }
   }
 
+  // Pose de brazos/manos para una habilidad (hadouken/heart/flower), que se
+  // muestra un ratito por encima de lo que esté haciendo el cuerpo
+  // (caminar/saltar/reposo) y después vuelve sola a lo normal.
+  playAction(name, durationMs = 450) {
+    this.actionState = name;
+    this.actionTimeLeft = durationMs;
+  }
+
   _setAngle(name, deg) {
     const c = this.containers[name];
     if (c) c.angle = deg;
   }
 
+  _applyAction(name) {
+    if (name === "hadouken") {
+      // Empuje con las dos manos hacia el frente, a la altura del pecho.
+      this._setAngle("left_upper_arm", -60);
+      this._setAngle("right_upper_arm", -60);
+      this._setAngle("left_lower_arm", -20);
+      this._setAngle("right_lower_arm", -20);
+      this._setAngle("head", -6);
+    } else if (name === "heart") {
+      // Manos juntas cerca de la cara/pecho.
+      this._setAngle("left_upper_arm", -35);
+      this._setAngle("right_upper_arm", -35);
+      this._setAngle("left_lower_arm", 115);
+      this._setAngle("right_lower_arm", 115);
+      this._setAngle("head", 4);
+    } else if (name === "flower") {
+      // Brazos bien arriba, como festejando.
+      this._setAngle("left_upper_arm", -165);
+      this._setAngle("right_upper_arm", -165);
+      this._setAngle("left_lower_arm", -8);
+      this._setAngle("right_lower_arm", -8);
+      this._setAngle("head", -8);
+    }
+    this._setAngle("left_upper_leg", 0);
+    this._setAngle("right_upper_leg", 0);
+    this._setAngle("left_lower_leg", 0);
+    this._setAngle("right_lower_leg", 0);
+    this.bobOffset = 0;
+  }
+
   update(delta) {
     const dt = delta / 1000;
+
+    if (this.actionState && this.actionTimeLeft > 0) {
+      this.actionTimeLeft -= delta;
+      this._applyAction(this.actionState);
+      if (this.actionTimeLeft <= 0) this.actionState = null;
+      return;
+    }
 
     if (this.state === "walk") {
       this.walkTime += dt * 14; // Velocidad de carrera

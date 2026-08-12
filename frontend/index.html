@@ -38,6 +38,11 @@
         <button id="btnProcess" hidden>✨ Generar personaje</button>
       </div>
 
+      <label class="checkbox-row">
+        <input type="checkbox" id="isPixelArt" />
+        Ya es una imagen pixel art (no volver a pixelarla)
+      </label>
+
       <p id="statusMsg" class="status"></p>
     </section>
 
@@ -46,7 +51,8 @@
       <div class="controls">
         <button id="btnBackToCapture">⬅ Volver a capturar</button>
       </div>
-      <p class="hint">Flechas para moverte, Espacio o Flecha arriba para saltar.</p>
+      <p class="hint">Flechas para moverte, Espacio o Flecha arriba para saltar.<br>
+        Q: hadouken (muñecas juntas) · W: corazón (muñecas juntas cerca de la cara) · E: flor (manos separadas y en alto)</p>
     </section>
 
     <div id="loadingOverlay" hidden>
@@ -67,8 +73,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-  <script src="js/capture.js"></script>
-  <script src="js/puppet.js"></script>
-  <script src="js/game.js"></script>
+  <script src="js/capture.js?v=4"></script>
+  <script src="js/puppet.js?v=3"></script>
+  <script src="js/game.js?v=3"></script>
 </body>
 </html>

@@ -165,6 +165,23 @@ header h1 { margin: 0; font-size: 2.8rem; letter-spacing: 1px; }
 
 .controls { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-bottom: 12px; }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9a9ab0;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #6c5ce7;
+}
+
 button, .upload-btn {
   background: #6c5ce7;
   color: white;
