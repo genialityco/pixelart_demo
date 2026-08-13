@@ -44,11 +44,31 @@ def remove_background(image_bytes: bytes) -> Image.Image:
     return cutout
 
 
-def bounding_box(rgba: Image.Image, alpha_threshold: int = 10) -> tuple[int, int, int, int]:
-    """Caja delimitadora del contenido no transparente (left, top, right, bottom)."""
+def bounding_box(
+    rgba: Image.Image, alpha_threshold: int = 10, padding_frac: float = 0.04
+) -> tuple[int, int, int, int]:
+    """Caja delimitadora del contenido no transparente (left, top, right, bottom),
+    con un margen proporcional alrededor.
+
+    Sin margen, un brazo/pierna que cuelga a los costados (el punto más
+    ancho del personaje, muy común) queda con su borde exacto pegado al
+    límite del recorte. rig.py después ensancha esas extremidades más allá
+    del contorno real (_capsule_polygon, para que se vean con volumen), y
+    ese ensanche se recorta contra el borde del lienzo -el personaje sale
+    "cortado" por los costados aunque el quitado de fondo esté perfecto.
+    """
     alpha = rgba.split()[-1]
     mask = alpha.point(lambda a: 255 if a > alpha_threshold else 0)
     bbox = mask.getbbox()
     if bbox is None:
         return (0, 0, rgba.width, rgba.height)
-    return bbox
+
+    left, top, right, bottom = bbox
+    pad_x = max(4, round((right - left) * padding_frac))
+    pad_y = max(4, round((bottom - top) * padding_frac))
+    return (
+        max(0, left - pad_x),
+        max(0, top - pad_y),
+        min(rgba.width, right + pad_x),
+        min(rgba.height, bottom + pad_y),
+    )

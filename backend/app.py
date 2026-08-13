@@ -24,6 +24,14 @@ SHOW_BG_PREVIEW = os.environ.get("SHOW_BG_PREVIEW", "true").strip().lower() not 
 CHARACTER_SCALE = float(os.environ.get("CHARACTER_SCALE", "1.0"))
 CONTROL_MODE = os.environ.get("CONTROL_MODE", "keyboard").strip().lower()
 
+# Orientación de la cámara (webcam). La mayoría de las webcams son
+# horizontales por hardware; "vertical" la rota 90° por software (CSS +
+# canvas) para usarla en modo retrato. Configurable vía .env
+# (CAMERA_ORIENTATION=vertical|horizontal).
+CAMERA_ORIENTATION = os.environ.get("CAMERA_ORIENTATION", "vertical").strip().lower()
+if CAMERA_ORIENTATION not in ("vertical", "horizontal"):
+    CAMERA_ORIENTATION = "vertical"
+
 app = FastAPI(title="Pixel Person API")
 
 app.add_middleware(
@@ -39,7 +47,8 @@ async def get_config():
     return {
         "showBgPreview": SHOW_BG_PREVIEW,
         "characterScale": CHARACTER_SCALE,
-        "controlMode": CONTROL_MODE
+        "controlMode": CONTROL_MODE,
+        "cameraOrientation": CAMERA_ORIENTATION,
     }
 
 

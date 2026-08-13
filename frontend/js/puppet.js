@@ -4,6 +4,53 @@
 // según la jerarquía padre-hijo. Rotar un contenedor rota todo lo que cuelga
 // de él, igual que una marioneta de recortes.
 
+// Secuencias de animación para las habilidades (Q/W/E o gestos con
+// MediaPipe): una lista de frames con ángulos de brazo, reproducida en
+// orden a un fps fijo -en vez de una sola pose fija sostenida un ratito.
+// Adaptado de la lógica de otro proyecto (mismo concepto, traducido a nuestro
+// rig y convención de signos: ángulo negativo en upperArm = brazo levantado):
+//  - Corazón: el HOMBRO hace la mayor parte del recorrido hacia arriba con
+//    el codo casi recto, así la mano sube junto a la cara -si el codo se
+//    dobla mucho en cambio, se lee como un abrazo.
+//  - Flor: las manos se juntan al pecho (codo muy doblado, como sacando
+//    algo de adentro) y se abren hacia afuera y abajo -la flor "nace" en
+//    ese momento de apertura.
+const ACTION_SEQUENCES = {
+  hadouken: {
+    fps: 10,
+    frames: [
+      { upperArm: -30, lowerArm: -10, head: -2 },
+      { upperArm: -55, lowerArm: -18, head: -6 },
+      { upperArm: -65, lowerArm: -20, head: -6 },
+      { upperArm: -40, lowerArm: -12, head: -3 },
+      { upperArm: -15, lowerArm: -5, head: 0 },
+      { upperArm: 0, lowerArm: 0, head: 0 },
+    ],
+  },
+  heart: {
+    fps: 9,
+    frames: [
+      { upperArm: -75, lowerArm: -15, head: -2 },
+      { upperArm: -112, lowerArm: -30, head: -4 },
+      { upperArm: -100, lowerArm: -25, head: -3 },
+      { upperArm: -60, lowerArm: -12, head: 0 },
+      { upperArm: -25, lowerArm: -6, head: 0 },
+      { upperArm: 0, lowerArm: 0, head: 0 },
+    ],
+  },
+  flower: {
+    fps: 8,
+    frames: [
+      { upperArm: -15, lowerArm: 70, head: 0 },
+      { upperArm: -25, lowerArm: 95, head: 0 },
+      { upperArm: -45, lowerArm: 40, head: -2 },
+      { upperArm: -55, lowerArm: 15, head: -3 },
+      { upperArm: -20, lowerArm: 8, head: -1 },
+      { upperArm: 0, lowerArm: 0, head: 0 },
+    ],
+  },
+};
+
 function loadTexture(scene, key, dataUrl) {
   return new Promise((resolve) => {
     if (scene.textures.exists(key)) {
@@ -39,7 +86,8 @@ class Puppet {
     this.bobOffset = 0;
     this.footOffsetY = rig.meta ? rig.meta.footOffsetY : 0;
     this.actionState = null;
-    this.actionTimeLeft = 0;
+    this.actionElapsed = 0;
+    this.actionDuration = 0;
   }
 
   build(x, y) {
@@ -84,12 +132,16 @@ class Puppet {
     }
   }
 
-  // Pose de brazos/manos para una habilidad (hadouken/heart/flower), que se
-  // muestra un ratito por encima de lo que esté haciendo el cuerpo
-  // (caminar/saltar/reposo) y después vuelve sola a lo normal.
-  playAction(name, durationMs = 450) {
+  // Animación de brazos/manos para una habilidad (hadouken/heart/flower):
+  // reproduce la secuencia de frames de ACTION_SEQUENCES por encima de lo
+  // que esté haciendo el cuerpo (caminar/saltar/reposo) y después vuelve
+  // sola a lo normal.
+  playAction(name) {
+    const seq = ACTION_SEQUENCES[name];
+    if (!seq) return;
     this.actionState = name;
-    this.actionTimeLeft = durationMs;
+    this.actionElapsed = 0;
+    this.actionDuration = (seq.frames.length / seq.fps) * 1000;
   }
 
   _setAngle(name, deg) {
@@ -97,29 +149,17 @@ class Puppet {
     if (c) c.angle = deg;
   }
 
-  _applyAction(name) {
-    if (name === "hadouken") {
-      // Empuje con las dos manos hacia el frente, a la altura del pecho.
-      this._setAngle("left_upper_arm", -60);
-      this._setAngle("right_upper_arm", -60);
-      this._setAngle("left_lower_arm", -20);
-      this._setAngle("right_lower_arm", -20);
-      this._setAngle("head", -6);
-    } else if (name === "heart") {
-      // Manos juntas cerca de la cara/pecho.
-      this._setAngle("left_upper_arm", -35);
-      this._setAngle("right_upper_arm", -35);
-      this._setAngle("left_lower_arm", 115);
-      this._setAngle("right_lower_arm", 115);
-      this._setAngle("head", 4);
-    } else if (name === "flower") {
-      // Brazos bien arriba, como festejando.
-      this._setAngle("left_upper_arm", -165);
-      this._setAngle("right_upper_arm", -165);
-      this._setAngle("left_lower_arm", -8);
-      this._setAngle("right_lower_arm", -8);
-      this._setAngle("head", -8);
-    }
+  _applyAction(name, elapsedMs) {
+    const seq = ACTION_SEQUENCES[name];
+    if (!seq) return;
+    const idx = Math.min(seq.frames.length - 1, Math.floor((elapsedMs / 1000) * seq.fps));
+    const frame = seq.frames[idx];
+
+    this._setAngle("left_upper_arm", frame.upperArm);
+    this._setAngle("right_upper_arm", frame.upperArm);
+    this._setAngle("left_lower_arm", frame.lowerArm);
+    this._setAngle("right_lower_arm", frame.lowerArm);
+    this._setAngle("head", frame.head);
     this._setAngle("left_upper_leg", 0);
     this._setAngle("right_upper_leg", 0);
     this._setAngle("left_lower_leg", 0);
@@ -130,11 +170,14 @@ class Puppet {
   update(delta) {
     const dt = delta / 1000;
 
-    if (this.actionState && this.actionTimeLeft > 0) {
-      this.actionTimeLeft -= delta;
-      this._applyAction(this.actionState);
-      if (this.actionTimeLeft <= 0) this.actionState = null;
-      return;
+    if (this.actionState) {
+      this.actionElapsed += delta;
+      if (this.actionElapsed >= this.actionDuration) {
+        this.actionState = null;
+      } else {
+        this._applyAction(this.actionState, this.actionElapsed);
+        return;
+      }
     }
 
     if (this.state === "walk") {

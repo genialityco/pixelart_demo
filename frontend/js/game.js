@@ -6,6 +6,7 @@ window.PixelPersonGame = (() => {
   let sceneRef = null;
   let pendingRig = null;
   let activeControlMode = "keyboard";
+  let activeCameraOrientation = "vertical";
 
   let mpPose = null;
   let mpLoop = false;
@@ -149,23 +150,26 @@ window.PixelPersonGame = (() => {
       // como una aproximación razonable:
       //  - Hadouken: muñecas juntas, a la altura del pecho/panza.
       //  - Corazón: muñecas juntas, a la altura de la cara/cabeza (más arriba).
-      //  - Flor: manos separadas y levantadas por encima de los codos (como
-      //    los dos brazos en alto haciendo "pulgares arriba").
+      //  - Flor: manos CLARAMENTE separadas y levantadas (como los dos
+      //    brazos en alto haciendo "pulgares arriba").
+      // La distancia entre muñecas se mide relativa al ancho de hombros (no
+      // en unidades absolutas): así no cambia según qué tan cerca esté la
+      // persona de la cámara. Un corazón con las manos "junto" a veces no
+      // queda tan pegado como 0.10 unidades absolutas -por eso antes caía
+      // en "flor" casi siempre. Se deja además una zona muerta entre
+      // "juntas" y "separadas" para no confundir ambos gestos.
       const noseY = lm[0].y;
       let gesture = null;
       if (leftWristVisible && rightWristVisible) {
+        const shoulderWidth = Math.hypot(lm[11].x - lm[12].x, lm[11].y - lm[12].y) || 0.2;
         const wristDist = Math.hypot(leftWrist.x - rightWrist.x, leftWrist.y - rightWrist.y);
+        const relWristDist = wristDist / shoulderWidth;
         const wristsY = (leftWrist.y + rightWrist.y) / 2;
-        const together = wristDist < 0.10;
-        if (together && wristsY < noseY + 0.06) {
-          gesture = "heart";
-        } else if (together) {
-          gesture = "hadouken";
-        } else if (
-          wristsY < shoulderY &&
-          leftWrist.y < lm[13].y - 0.02 &&
-          rightWrist.y < lm[14].y - 0.02
-        ) {
+        const raised = wristsY < shoulderY - 0.02 || wristsY < noseY + 0.06;
+
+        if (relWristDist < 0.9) {
+          gesture = raised ? "heart" : "hadouken";
+        } else if (relWristDist > 1.3 && raised) {
           gesture = "flower";
         }
       }
@@ -214,18 +218,27 @@ window.PixelPersonGame = (() => {
         const vw = videoElement.videoWidth;
         const vh = videoElement.videoHeight;
 
-        // Rota el frame 90° (ancho/alto intercambiados) antes de mandarlo a
-        // MediaPipe, mismo sentido que capture.js, style.css (#webcam) e
-        // index.html (#mp-webcam).
-        if (rotatedCanvas.width !== vh || rotatedCanvas.height !== vw) {
-          rotatedCanvas.width = vh;
-          rotatedCanvas.height = vw;
+        if (activeCameraOrientation === "horizontal") {
+          // Cámara usada tal cual (sin rotar).
+          if (rotatedCanvas.width !== vw || rotatedCanvas.height !== vh) {
+            rotatedCanvas.width = vw;
+            rotatedCanvas.height = vh;
+          }
+          rotatedCtx.drawImage(videoElement, 0, 0, vw, vh);
+        } else {
+          // Rota el frame 90° (ancho/alto intercambiados) antes de mandarlo
+          // a MediaPipe, mismo sentido que capture.js, style.css (#webcam) e
+          // index.html (#mp-webcam).
+          if (rotatedCanvas.width !== vh || rotatedCanvas.height !== vw) {
+            rotatedCanvas.width = vh;
+            rotatedCanvas.height = vw;
+          }
+          rotatedCtx.save();
+          rotatedCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+          rotatedCtx.rotate(-Math.PI / 2);
+          rotatedCtx.drawImage(videoElement, -vw / 2, -vh / 2, vw, vh);
+          rotatedCtx.restore();
         }
-        rotatedCtx.save();
-        rotatedCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
-        rotatedCtx.rotate(-Math.PI / 2);
-        rotatedCtx.drawImage(videoElement, -vw / 2, -vh / 2, vw, vh);
-        rotatedCtx.restore();
 
         try {
           await mpPose.send({image: rotatedCanvas});
@@ -266,7 +279,21 @@ window.PixelPersonGame = (() => {
       this.load.tilemapTiledJSON('map1', 'assets/maps/map1.json');
       this.load.image('Terrain (16x16)', 'assets/maps/Terrain16x16.png');
       this.load.image('Collision', 'assets/maps/collisionTileSets.png');
-      this.load.image('Blue', 'assets/maps/bg-blue.png');
+    }
+
+    // No hay ningún asset de nube en el proyecto: se dibuja una nube
+    // pixel-art (rectángulos superpuestos) una sola vez y se reusa como
+    // textura para todas las nubes del cielo.
+    ensureCloudTexture() {
+      if (this.textures.exists('cloud')) return;
+      const g = this.add.graphics();
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(10, 14, 44, 14);
+      g.fillRect(20, 6, 26, 12);
+      g.fillRect(0, 18, 14, 10);
+      g.fillRect(50, 16, 14, 10);
+      g.generateTexture('cloud', 64, 28);
+      g.destroy();
     }
 
     create() {
@@ -282,10 +309,29 @@ window.PixelPersonGame = (() => {
       // mundo (1536x768) da margen real de scroll en ambos ejes.
       const tileScale = 3;
 
-      // Background
-      this.background = this.add.tileSprite(0, 0, map.widthInPixels * tileScale, map.heightInPixels * tileScale, 'Blue');
-      this.background.setOrigin(0, 0);
-      this.background.setScrollFactor(0);
+      // Fondo: cielo celeste + nubes dibujadas por código, con parallax
+      // (scrollFactor bajo: se mueven menos que la cámara, se ven "lejos")
+      // y una deriva propia en update() para que se muevan incluso si el
+      // personaje está quieto.
+      const worldW = map.widthInPixels * tileScale;
+      const worldH = map.heightInPixels * tileScale;
+
+      this.sky = this.add.rectangle(worldW / 2, worldH / 2, worldW, worldH, 0x5ec8f2);
+      this.sky.setScrollFactor(0.05);
+
+      this.ensureCloudTexture();
+      this.clouds = [];
+      for (let i = 0; i < 7; i++) {
+        const x = Phaser.Math.Between(0, worldW);
+        const y = Phaser.Math.Between(20, Math.min(220, worldH * 0.4));
+        const cloud = this.add.image(x, y, 'cloud');
+        cloud.setScale(Phaser.Math.FloatBetween(1.4, 3.2));
+        cloud.setAlpha(Phaser.Math.FloatBetween(0.75, 1));
+        cloud.setScrollFactor(0.25);
+        cloud.driftSpeed = Phaser.Math.FloatBetween(8, 22);
+        this.clouds.push(cloud);
+      }
+      this.cloudWorldWidth = worldW;
 
       const tileset1 = map.addTilesetImage('Terrain (16x16)', 'Terrain (16x16)');
       const tileset2 = map.addTilesetImage('Collision', 'Collision');
@@ -440,15 +486,22 @@ window.PixelPersonGame = (() => {
     }
 
     update(time, delta) {
-      // scroll background
-      if (this.background) {
-        this.background.tilePositionY += 0.5;
+      // Deriva de las nubes: se mueven solas hacia la derecha y reaparecen
+      // del otro lado al salir del mundo.
+      if (this.clouds) {
+        const dt = delta / 1000;
+        for (const cloud of this.clouds) {
+          cloud.x += cloud.driftSpeed * dt;
+          if (cloud.x - cloud.displayWidth / 2 > this.cloudWorldWidth) {
+            cloud.x = -cloud.displayWidth / 2;
+          }
+        }
       }
 
       if (!this.puppet) return;
 
       const speed = 220;
-      const jumpVel = -640;
+      const jumpVel = -760;
 
       let moving = false;
       let wantsJump = false;
@@ -551,8 +604,10 @@ window.PixelPersonGame = (() => {
     });
   }
 
-  function start(rig, scale = 1.0, controlMode = "keyboard") {
+  function start(rig, scale = 1.0, controlMode = "keyboard", cameraOrientation = "vertical") {
     activeControlMode = controlMode;
+    activeCameraOrientation = cameraOrientation;
+    document.body.classList.toggle("camera-horizontal", activeCameraOrientation === "horizontal");
     if (activeControlMode === "mediapipe") {
       initMediaPipe();
     } else {

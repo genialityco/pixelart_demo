@@ -27,6 +27,7 @@
   let showBgPreview = false;
   let characterScale = 1.0;
   let controlMode = "keyboard";
+  let cameraOrientation = "vertical";
 
   async function loadConfig() {
     try {
@@ -35,9 +36,14 @@
       showBgPreview = !!data.showBgPreview;
       if (data.characterScale) characterScale = data.characterScale;
       if (data.controlMode) controlMode = data.controlMode;
+      if (data.cameraOrientation) cameraOrientation = data.cameraOrientation;
     } catch (err) {
       showBgPreview = false;
     }
+  }
+
+  function applyCameraOrientation() {
+    document.body.classList.toggle("camera-horizontal", cameraOrientation === "horizontal");
   }
 
   function hideNoBgPreview() {
@@ -132,17 +138,24 @@
   function capturePhoto() {
     const w = video.videoWidth;
     const h = video.videoHeight;
-    // La cámara entrega el video en horizontal; la giramos 90° (igual que
-    // la vista previa en CSS, #mp-webcam y el canvas para MediaPipe en
-    // game.js) para que la foto capturada salga vertical.
-    canvas.width = h;
-    canvas.height = w;
     const ctx = canvas.getContext("2d");
-    ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.drawImage(video, -w / 2, -h / 2, w, h);
-    ctx.restore();
+    if (cameraOrientation === "horizontal") {
+      // La cámara se usa tal cual la entrega el hardware, sin rotar.
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+    } else {
+      // La cámara entrega el video en horizontal; la giramos 90° (igual que
+      // la vista previa en CSS, #mp-webcam y el canvas para MediaPipe en
+      // game.js) para que la foto capturada salga vertical.
+      canvas.width = h;
+      canvas.height = w;
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.drawImage(video, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
     canvas.toBlob(
       (blob) => {
         capturedBlob = blob;
@@ -202,7 +215,7 @@
         });
       }
 
-      window.PixelPersonGame.start(data, characterScale, controlMode);
+      window.PixelPersonGame.start(data, characterScale, controlMode, cameraOrientation);
     } catch (err) {
       statusMsg.textContent = err.message;
     } finally {
@@ -225,6 +238,8 @@
     showLiveView();
   });
 
-  loadConfig();
-  startCamera();
+  loadConfig().then(() => {
+    applyCameraOrientation();
+    startCamera();
+  });
 })();
