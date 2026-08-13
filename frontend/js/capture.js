@@ -19,6 +19,7 @@
   const noBgPreviewImg = document.getElementById("noBgPreviewImg");
 
   const isPixelArtCheckbox = document.getElementById("isPixelArt");
+  const invertFacingCheckbox = document.getElementById("invertFacing");
 
   const countdownEl = document.getElementById("captureCountdown");
 
@@ -215,7 +216,7 @@
         });
       }
 
-      window.PixelPersonGame.start(data, characterScale, controlMode, cameraOrientation);
+      window.PixelPersonGame.start(data, characterScale, controlMode, cameraOrientation, invertFacingCheckbox.checked);
     } catch (err) {
       statusMsg.textContent = err.message;
     } finally {

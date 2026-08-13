@@ -54,9 +54,14 @@ def _capsule_polygon(a: Point, b: Point, half_width: float, extend_start: float 
     ]
 
 
-def _cut_part(pixel_art: Image.Image, polygon: list[Point], padding: int = 2):
+def _cut_part(pixel_art: Image.Image, shapes: list[list[Point]], padding: int = 2):
+    """`shapes` es una lista de polígonos: se unen (OR) en una sola máscara,
+    para poder cubrir formas que un solo polígono convexo no puede (p. ej.
+    pantorrilla + pie, que no son colineales)."""
     mask = Image.new("L", pixel_art.size, 0)
-    ImageDraw.Draw(mask).polygon(polygon, fill=255)
+    draw = ImageDraw.Draw(mask)
+    for shape in shapes:
+        draw.polygon(shape, fill=255)
     alpha = pixel_art.split()[-1]
     combined = ImageChops.multiply(mask, alpha)
     bbox = combined.getbbox()
@@ -99,48 +104,52 @@ def build_rig(pixel_art: Image.Image, lm: dict[str, Point]) -> Optional[dict]:
 
     arm_hw = max(4.0, shoulder_w * 0.16)
     leg_hw = max(6.0, hip_w * 0.34)
-    head_hw = max(6.0, shoulder_w * 0.62)
+    head_hw = max(6.0, shoulder_w * 0.7)
 
     landmarks = dict(lm)
     landmarks["neck"] = neck
     landmarks["pelvis"] = pelvis
 
-    specs: list[tuple[str, Optional[str], list[Point]]] = []
+    specs: list[tuple[str, Optional[str], list[list[Point]]]] = []
 
     specs.append((
         "torso", None,
-        _expand_quad(
+        [_expand_quad(
             [lm["left_shoulder"], lm["right_shoulder"], lm["right_hip"], lm["left_hip"]],
             out_scale=1.22,
-        ),
+        )],
     ))
 
     specs.append((
         "head", "torso",
-        [
+        [[
             (neck[0] - head_hw, 0),
             (neck[0] + head_hw, 0),
             (neck[0] + head_hw, neck[1] + shoulder_w * 0.12),
             (neck[0] - head_hw, neck[1] + shoulder_w * 0.12),
-        ],
+        ]],
     ))
 
     feet_ys = []
     for side in ("left", "right"):
         sh, el, wr = lm[f"{side}_shoulder"], lm[f"{side}_elbow"], lm[f"{side}_wrist"]
         specs.append((f"{side}_upper_arm", "torso",
-                       _capsule_polygon(sh, el, arm_hw, extend_start=arm_hw * 0.6, extend_end=arm_hw * 0.3)))
+                       [_capsule_polygon(sh, el, arm_hw, extend_start=arm_hw * 0.6, extend_end=arm_hw * 0.3)]))
         specs.append((f"{side}_lower_arm", f"{side}_upper_arm",
-                       _capsule_polygon(el, wr, arm_hw * 0.85, extend_start=arm_hw * 0.3, extend_end=arm_hw * 1.3)))
+                       [_capsule_polygon(el, wr, arm_hw * 0.85, extend_start=arm_hw * 0.3, extend_end=arm_hw * 1.3)]))
 
         hip, knee, ankle = lm[f"{side}_hip"], lm[f"{side}_knee"], lm[f"{side}_ankle"]
         toe = lm.get(f"{side}_foot_index", ankle)
         heel = lm.get(f"{side}_heel", ankle)
-        foot_end = (ankle[0] + (toe[0] - ankle[0]) * 1.3, ankle[1] + (toe[1] - ankle[1]) * 1.3)
         specs.append((f"{side}_upper_leg", "torso",
-                       _capsule_polygon(hip, knee, leg_hw, extend_start=leg_hw * 0.6, extend_end=leg_hw * 0.3)))
-        specs.append((f"{side}_lower_leg", f"{side}_upper_leg",
-                       _capsule_polygon(knee, foot_end, leg_hw * 0.95, extend_start=leg_hw * 0.3, extend_end=leg_hw * 0.9)))
+                       [_capsule_polygon(hip, knee, leg_hw, extend_start=leg_hw * 0.6, extend_end=leg_hw * 0.3)]))
+        # La pantorrilla (rodilla->tobillo) y el pie (talón->punta) casi
+        # nunca están alineados: una sola cápsula recta rodilla->punta deja
+        # el talón (que sobresale hacia atrás, no hacia la punta) fuera del
+        # polígono y se recorta. Se usan dos formas separadas y se unen.
+        calf = _capsule_polygon(knee, ankle, leg_hw, extend_start=leg_hw * 0.3, extend_end=leg_hw * 0.3)
+        foot = _capsule_polygon(heel, toe, leg_hw * 1.2, extend_start=leg_hw * 0.7, extend_end=leg_hw * 0.7)
+        specs.append((f"{side}_lower_leg", f"{side}_upper_leg", [calf, foot]))
         feet_ys.extend([ankle[1], heel[1], toe[1]])
 
     bboxes: dict[str, tuple[int, int, int, int]] = {}

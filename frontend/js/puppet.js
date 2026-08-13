@@ -88,6 +88,7 @@ class Puppet {
     this.actionState = null;
     this.actionElapsed = 0;
     this.actionDuration = 0;
+    this.invertFacing = false;
   }
 
   build(x, y) {
@@ -183,24 +184,35 @@ class Puppet {
     if (this.state === "walk") {
       this.walkTime += dt * 14; // Velocidad de carrera
       const t = this.walkTime;
-      
+
       // Piernas: ciclo de carrera realista
       // El muslo va de adelante hacia atrás con sin(t)
       this._setAngle("left_upper_leg", Math.sin(t) * 50);
       this._setAngle("right_upper_leg", Math.sin(t + Math.PI) * 50);
-      
-      // La pantorrilla se dobla al máximo cuando la pierna vuelve hacia adelante (cos(t))
-      this._setAngle("left_lower_leg", Math.max(0, Math.cos(t)) * -95);
-      this._setAngle("right_lower_leg", Math.max(0, Math.cos(t + Math.PI)) * -95);
-      
-      // Brazos: opuestos a las piernas
-      this._setAngle("left_upper_arm", Math.sin(t + Math.PI) * 45);
-      this._setAngle("right_upper_arm", Math.sin(t) * 45);
-      
-      // Codos doblados en postura de corredor (más doblados cuando van adelante)
-      this._setAngle("left_lower_arm", -40 + Math.max(0, Math.sin(t + Math.PI)) * -40);
-      this._setAngle("right_lower_arm", -40 + Math.max(0, Math.sin(t)) * -40);
-      
+
+      // La pantorrilla se dobla al máximo cuando la pierna vuelve hacia adelante (cos(t)).
+      // Signo positivo: la rodilla flexiona hacia atrás (como una rodilla real),
+      // no hacia adelante.
+      this._setAngle("left_lower_leg", Math.max(0, Math.cos(t)) * 45);
+      this._setAngle("right_lower_leg", Math.max(0, Math.cos(t + Math.PI)) * 45);
+
+      // Brazos: opuestos a las piernas. Con invertFacing activo, el espejo
+      // del torso invierte también el sentido en que se leen estas
+      // rotaciones, así que se compensa con el mismo signo.
+      const armSign = this.invertFacing ? -1 : 1;
+      this._setAngle("left_upper_arm", Math.sin(t + Math.PI) * 45 * armSign);
+      this._setAngle("right_upper_arm", Math.sin(t) * 45 * armSign);
+
+      // Codos doblados en postura de corredor (más doblados cuando van adelante).
+      // El brazo que queda atrás (fase <= 0) invierte el sentido del codo.
+      const leftArmPhase = Math.sin(t + Math.PI);
+      const leftElbow = leftArmPhase > 40 ? -40 + leftArmPhase * -40 : 40;
+      this._setAngle("left_lower_arm", leftElbow * armSign);
+
+      const rightArmPhase = Math.sin(t);
+      const rightElbow = rightArmPhase > 40 ? -40 + rightArmPhase * -40 : 40;
+      this._setAngle("right_lower_arm", rightElbow * armSign);
+
       // Cabeza y cuerpo (bobbing pronunciado)
       this._setAngle("head", Math.sin(t * 2) * 4 + 8); // Inclinado hacia adelante
       this.bobOffset = -Math.abs(Math.sin(t)) * 8; // Brinco
@@ -208,18 +220,18 @@ class Puppet {
       // Salto dinámico: pose de acción
       // Pierna frontal levantada y doblada
       this._setAngle("left_upper_leg", -60);
-      this._setAngle("left_lower_leg", -20);
+      this._setAngle("left_lower_leg", 20);
       // Pierna trasera estirada hacia atrás
       this._setAngle("right_upper_leg", 30);
-      this._setAngle("right_lower_leg", -70);
-      
+      this._setAngle("right_lower_leg", 70);
+
       // Brazo frontal buscando altura
       this._setAngle("left_upper_arm", -100);
       this._setAngle("left_lower_arm", -10);
       // Brazo trasero dando impulso hacia atrás
       this._setAngle("right_upper_arm", 50);
       this._setAngle("right_lower_arm", -40);
-      
+
       this._setAngle("head", -15); // Mirando un poco hacia arriba
       this.bobOffset = 0;
     } else {

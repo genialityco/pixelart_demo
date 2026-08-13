@@ -7,6 +7,7 @@ window.PixelPersonGame = (() => {
   let pendingRig = null;
   let activeControlMode = "keyboard";
   let activeCameraOrientation = "vertical";
+  let activeInvertFacing = false;
 
   let mpPose = null;
   let mpLoop = false;
@@ -423,16 +424,24 @@ window.PixelPersonGame = (() => {
       this.playerBody.body.setVelocity(0, 0);
       
       this.puppet = await Puppet.create(this, rig, spawnX, spawnY, this.instanceId);
+      // El espejo de scaleX (usado por setFacing) invierte el sentido en que se
+      // "leen" las rotaciones de brazos/piernas; si el torso está invertido,
+      // el ciclo de animación también debe compensarse o se ve como moonwalk.
+      this.puppet.invertFacing = activeInvertFacing;
 
       this.puppet.setPosition(this.playerBody.x, this.playerBody.y - this.puppet.footOffsetY + 32);
     }
 
     // dir: 1 = derecha, -1 = izquierda. Usa el volteo visual actual del
     // muñeco (setFacing ignora dir=0 "de frente" y conserva el último
-    // espejo), así la habilidad siempre sale para el lado correcto.
+    // espejo), así la habilidad siempre sale para el lado correcto. Se
+    // deshace la inversión de activeInvertFacing (si está activa) para que
+    // el efecto salga según la dirección real de movimiento, no según el
+    // espejo cosmético del torso.
     currentFacingDir() {
       if (!this.puppet) return 1;
-      return this.puppet.rootContainer.scaleX < 0 ? 1 : -1;
+      const visualDir = this.puppet.rootContainer.scaleX < 0 ? 1 : -1;
+      return activeInvertFacing ? -visualDir : visualDir;
     }
 
     castAbility(type) {
@@ -454,12 +463,46 @@ window.PixelPersonGame = (() => {
     }
 
     spawnHadouken(x, y, dir) {
-      const proj = this.add.text(x, y, "💥", { fontSize: "30px" }).setOrigin(0.5);
-      proj.setFlipX(dir < 0);
+      // Bola de energía azul (estilo hadouken), armada con círculos en vez
+      // de un emoji: brillo exterior aditivo + esfera azul con núcleo claro.
+      const proj = this.add.container(x, y);
+
+      const glow = this.add.graphics();
+      glow.fillStyle(0x3aa8ff, 0.35);
+      glow.fillCircle(0, 0, 22);
+      glow.setBlendMode(Phaser.BlendModes.ADD);
+
+      const ball = this.add.graphics();
+      ball.fillStyle(0x0d3f91, 1);
+      ball.fillCircle(0, 0, 15);
+      ball.fillStyle(0x3aa0ff, 1);
+      ball.fillCircle(0, 0, 11);
+      ball.fillStyle(0xdff3ff, 1);
+      ball.fillCircle(-3, -3, 5);
+
+      proj.add([glow, ball]);
+
       this.physics.add.existing(proj);
       proj.body.setAllowGravity(false);
+      proj.body.setCircle(16, -16, -16);
       proj.body.setVelocityX(520 * dir);
-      this.time.delayedCall(1200, () => proj.destroy());
+
+      // Pulso de brillo + giro del núcleo para dar sensación de energía viva.
+      this.tweens.add({
+        targets: glow,
+        scale: { from: 0.85, to: 1.2 },
+        alpha: { from: 0.45, to: 0.15 },
+        duration: 220,
+        yoyo: true,
+        repeat: -1,
+      });
+      this.tweens.add({ targets: ball, angle: dir < 0 ? -360 : 360, duration: 450, repeat: -1 });
+
+      this.time.delayedCall(1200, () => {
+        this.tweens.killTweensOf(glow);
+        this.tweens.killTweensOf(ball);
+        proj.destroy();
+      });
     }
 
     spawnHeart(x, y, dir) {
@@ -472,8 +515,25 @@ window.PixelPersonGame = (() => {
     }
 
     spawnFlower(x, y, dir) {
-      const proj = this.add.text(x, y, "🌸", { fontSize: "26px" }).setOrigin(0.5);
+      const proj = this.add.container(x, y);
+
+      // Tallo verde con una hojita, debajo de la flor.
+      const stem = this.add.graphics();
+      stem.fillStyle(0x3f9142, 1);
+      stem.fillRoundedRect(-3, 6, 6, 32, 3);
+      stem.fillEllipse(8, 24, 14, 6);
+
+      // padding evita que Phaser recorte el emoji por arriba: el glifo se
+      // dibuja un poco por fuera de la caja de métricas de texto normal.
+      const bloom = this.add
+        .text(0, 0, "🌸", { fontSize: "42px", padding: { top: 12, bottom: 12, left: 12, right: 12 } })
+        .setOrigin(0.5);
+
+      proj.add([stem, bloom]);
+
       this.physics.add.existing(proj);
+      proj.body.setSize(45, 58);
+      proj.body.setOffset(-22, -19);
       proj.body.setVelocityX(180 * dir);
       proj.body.setVelocityY(-260);
       proj.body.setBounce(0.25);
@@ -572,7 +632,7 @@ window.PixelPersonGame = (() => {
         this.puppet.setState("idle");
       }
 
-      this.puppet.setFacing(this.player.facing);
+      this.puppet.setFacing(activeInvertFacing ? -this.player.facing : this.player.facing);
       this.puppet.update(delta);
       
       // Update puppet position based on physics body
@@ -604,9 +664,10 @@ window.PixelPersonGame = (() => {
     });
   }
 
-  function start(rig, scale = 1.0, controlMode = "keyboard", cameraOrientation = "vertical") {
+  function start(rig, scale = 1.0, controlMode = "keyboard", cameraOrientation = "vertical", invertFacing = false) {
     activeControlMode = controlMode;
     activeCameraOrientation = cameraOrientation;
+    activeInvertFacing = invertFacing;
     document.body.classList.toggle("camera-horizontal", activeCameraOrientation === "horizontal");
     if (activeControlMode === "mediapipe") {
       initMediaPipe();
