@@ -23,6 +23,25 @@ window.PixelPersonGame = (() => {
     gesture: null // "hadouken" | "heart" | "flower" | null
   };
 
+  // Dibuja un sprite pixel art a partir de una grilla de caracteres (cada
+  // fila un string, cada char una clave de `palette`; '.' = vacío),
+  // centrado en (0,0), como bloques cuadrados de `pixelSize` sin
+  // antialiasing (fillRect, no formas suaves).
+  function drawPixelSprite(graphics, rows, palette, pixelSize) {
+    const h = rows.length;
+    const w = rows[0].length;
+    const offsetX = -(w * pixelSize) / 2;
+    const offsetY = -(h * pixelSize) / 2;
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const color = palette[rows[ry][rx]];
+        if (color === undefined) continue;
+        graphics.fillStyle(color, 1);
+        graphics.fillRect(offsetX + rx * pixelSize, offsetY + ry * pixelSize, pixelSize, pixelSize);
+      }
+    }
+  }
+
   function initMediaPipe() {
     if (mpPose) return;
     
@@ -472,19 +491,30 @@ window.PixelPersonGame = (() => {
       glow.fillCircle(0, 0, 22);
       glow.setBlendMode(Phaser.BlendModes.ADD);
 
+      // Núcleo pixel art: una grilla circular por bandas de distancia (en
+      // vez de fillCircle, que da un borde suave/antialiaseado).
+      const HADOUKEN_PX = 5;
+      const HADOUKEN_N = 7;
+      const HADOUKEN_PALETTE = { A: 0x0d3f91, B: 0x3aa0ff, C: 0xdff3ff };
+      const center = (HADOUKEN_N - 1) / 2;
+      const hadoukenRows = [];
+      for (let ry = 0; ry < HADOUKEN_N; ry++) {
+        let row = "";
+        for (let rx = 0; rx < HADOUKEN_N; rx++) {
+          const d = Math.hypot(rx - center, ry - center - 0.4);
+          row += d <= 1.1 ? "C" : d <= 2.3 ? "B" : d <= 3.3 ? "A" : ".";
+        }
+        hadoukenRows.push(row);
+      }
+
       const ball = this.add.graphics();
-      ball.fillStyle(0x0d3f91, 1);
-      ball.fillCircle(0, 0, 15);
-      ball.fillStyle(0x3aa0ff, 1);
-      ball.fillCircle(0, 0, 11);
-      ball.fillStyle(0xdff3ff, 1);
-      ball.fillCircle(-3, -3, 5);
+      drawPixelSprite(ball, hadoukenRows, HADOUKEN_PALETTE, HADOUKEN_PX);
 
       proj.add([glow, ball]);
 
       this.physics.add.existing(proj);
       proj.body.setAllowGravity(false);
-      proj.body.setCircle(16, -16, -16);
+      proj.body.setCircle(17, -17, -17);
       proj.body.setVelocityX(520 * dir);
 
       // Pulso de brillo + giro del núcleo para dar sensación de energía viva.
@@ -506,9 +536,30 @@ window.PixelPersonGame = (() => {
     }
 
     spawnHeart(x, y, dir) {
-      const proj = this.add.text(x, y, "❤️", { fontSize: "26px" }).setOrigin(0.5);
+      // Corazón pixel art (grilla de bloques) en vez del emoji, más grande.
+      const HEART_PX = 7;
+      const HEART_ROWS = [
+        ".BB..AA.",
+        "BAAAAAAA",
+        "AAAAAAAA",
+        "AAAAAAAA",
+        ".AAAAAA.",
+        "..AAAA..",
+        "...AA...",
+      ];
+      const HEART_PALETTE = { A: 0xe23b5e, B: 0xff8fae };
+
+      const proj = this.add.container(x, y);
+      const gfx = this.add.graphics();
+      drawPixelSprite(gfx, HEART_ROWS, HEART_PALETTE, HEART_PX);
+      proj.add(gfx);
+
+      const w = HEART_ROWS[0].length * HEART_PX;
+      const h = HEART_ROWS.length * HEART_PX;
       this.physics.add.existing(proj);
       proj.body.setAllowGravity(false);
+      proj.body.setSize(w, h);
+      proj.body.setOffset(-w / 2, -h / 2);
       proj.body.setVelocityX(360 * dir);
       proj.body.setVelocityY(-30);
       this.time.delayedCall(1400, () => proj.destroy());
